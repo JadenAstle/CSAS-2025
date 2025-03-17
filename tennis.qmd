@@ -1,0 +1,524 @@
+---
+title: "Tennis Analytics - CSAS 2025"
+author: "Jaden Astle"
+date: "4/11/2025"
+format:
+  revealjs:
+    slideNumber: true
+    width: 1280
+    height: 1000
+    margin: 0.1
+    scrollable: true
+
+html: true
+theme: black
+slide-number: true
+---
+
+### Introduction & Score Review
+
+- 1v1 or 2v2 format
+- Split into three different groups: games, sets, and matches
+
+---
+
+### Introduction & Score Review
+
+- A **match** is won by winning the majority number of sets
+    - best of 3 for women's matches & doubles, best of 5 for men's
+
+---
+
+### Introduction & Score Review
+
+- A **set** is won by winning the majority number of games
+    - first to six, win by two
+    - if score reaches 6-6, a 'tiebreak' ensues
+        - first to 7 points wins (must win by 2)
+        - if set is a match-deciding set, first to 10 points wins (must win by 2)
+
+---
+
+### Introduction & Score Review
+
+- A **game** is essentially first to 4 points wins, win by two
+    - Game scoring is as follows:
+        - Love (0), 15 (1), 30 (2), 40 (30), win (4)
+        - If both players have a score of 40, it is called a "deuce" and the scoring changes
+        - If the server scores the next point -> "ad-in"
+        - If the receiver scores the next point -> "ad-out"
+        - If one player scores a point followed by the opponent scoring a point -> back to "deuce"
+
+---
+
+## Serve Analyses
+
+```{python}
+#| echo: true
+import pandas as pd
+df2 = pd.read_csv('data/2024-usopen-points.csv')
+serve_df = df2[['match_id', 'ElapsedTime', 'Speed_MPH', 'ServeWidth', 
+'ServeDepth', 'ReturnDepth', 'ServeNumber', 'ServeIndicator', 'PointWinner', 
+'P1Ace', 'P2Ace', 'PointServer']]
+serve_df.head()
+```
+
+---
+
+### How do success rates of 1st vs 2nd serves compare?
+
+- Servers get two serve attempts per serve
+    - Missing first serve is known as a "fault"
+- Do servers have a lower point win rate if they get one fault?
+
+---
+
+### How do success rates of 1st vs 2nd serves compare?
+```{python}
+#| echo: true
+success_1 =  len(serve_df[(serve_df['ServeNumber'] == 1) & 
+                    (serve_df['PointWinner'] == serve_df['ServeIndicator'])])
+success_2 = len(serve_df[(serve_df['ServeNumber'] == 2) & 
+                    (serve_df['PointWinner'] == serve_df['ServeIndicator'])])
+
+n_1 = len(serve_df[serve_df['ServeNumber'] == 1])
+n_2 = len(serve_df[serve_df['ServeNumber'] == 2])
+
+serve_1_rate = success_1 / n_1
+serve_2_rate = success_2 / n_2
+
+print(round(serve_1_rate, 4)) 
+print(round(serve_2_rate, 4))
+```
+
+---
+
+### How do success rates of 1st vs 2nd serves compare?
+
+$$
+H_0: \mu_1 = \mu_2
+$$
+
+$$
+H_1: \mu_1 \neq \mu_2
+$$
+
+$$
+\alpha = 0.05
+$$
+
+```{python}
+#| echo: true
+from statsmodels.stats.proportion import proportions_ztest
+import numpy as np
+
+successes = np.array([success_1, success_2])
+trials = np.array([n_1, n_2])
+
+z_stat, p = proportions_ztest(successes, trials, alternative='two-sided')
+
+print(f'P-value: {p:.4f}')
+```
+
+---
+
+### How do success rates of 1st vs 2nd serves compare?
+
+```{python}
+#| echo: true
+import scipy.stats as stats
+import matplotlib.pyplot as plt
+
+serve_rates = np.array([serve_1_rate, serve_2_rate])
+se = np.sqrt(serve_rates * (1 - serve_rates) / trials)
+
+z_critical = stats.norm.ppf(0.975)  # Z-score for 95% CI
+ci_lower = serve_rates - z_critical * se
+ci_upper = serve_rates + z_critical * se
+print(f'({ci_lower[0]}, {ci_upper[0]})')
+print(f'({ci_lower[1]}, {ci_upper[1]})')
+```
+
+---
+
+### Does a faster serve really help?
+
+- Flat, slice, kick
+- Flat serves are often used to try for an ace
+    - How big is this impact?
+
+---
+
+### Does a faster serve really help?
+
+```{python}
+#| echo: true
+import seaborn as sns
+serve_df.loc[:, 'PointWon'] = (serve_df['PointWinner'] == serve_df['ServeIndicator']).astype(int)
+serve_df = serve_df[serve_df['Speed_MPH'] != 0]  
+
+plt.figure(figsize=(12,10))
+sns.boxplot(x=serve_df['PointWon'], y=serve_df['Speed_MPH'])
+plt.xticks([0,1], ['Lost Point', 'Won Point'])
+plt.xlabel("Point Outcome")
+plt.ylabel("Serve Speed (MPH)")
+plt.title("Distribution of Serve Speed for Won vs. Lost Points")
+plt.show()
+```
+
+---
+
+### Does a faster serve really help?
+
+$$
+H_0: \mu_1 = \mu_2
+$$
+
+$$
+H_1: \mu_1 \neq \mu_2
+$$
+
+$$
+\alpha = 0.05
+$$
+
+```{python}
+#| echo: true
+import pingouin as pg
+won_speeds = serve_df[serve_df['PointWon'] == 1]['Speed_MPH']
+lost_speeds = serve_df[serve_df['PointWon'] == 0]['Speed_MPH']
+
+t_stat, p = stats.ttest_ind(won_speeds, lost_speeds, equal_var=False)
+print(f'p-value: {p}')
+
+cohen_d = pg.compute_effsize(won_speeds, lost_speeds, paired=False, eftype='cohen')
+print(f'Cohen\'s d: {cohen_d:.3f}')
+```
+
+---
+
+### Does one serve area have higher success rates than others?
+
+:::{.columns}
+:::: {.column width="50%"}
+- Two key variables to look at
+- **ServeWidth**  
+    - B: Body  
+    - BC: Body/Center  
+    - BW: Body/Wide  
+    - C: Center ["down the T"]  
+    - W: Wide  
+- **ServeDepth**  
+    - CTL: Close To Line  
+    - NCTL: Not Close To Line  
+::::
+
+:::: {.column width="50%"}
+
+<div style="position: absolute; bottom: 90px; right: 0.5;">
+![](images/court.jpeg){style="transform: rotate(90deg); width=100%; length=200%"}
+</div>
+
+::::
+:::
+
+---
+
+#### Most successful serves based on aces
+
+```{python}
+#| echo: true
+serve_aces = serve_df[(serve_df['P1Ace'] == 1) | (serve_df['P2Ace'] == 1)]  
+
+serve_counts = serve_df.groupby('ServeWidth').size()
+ace_counts = serve_aces.groupby('ServeWidth').size()
+
+proportions = ace_counts / serve_counts
+```
+
+---
+
+#### Most successful serves based on aces
+
+```{python}
+plt.figure(figsize=(14,8.4))
+sns.barplot(x=proportions.index, y=proportions.values, order=['W', 'BW', 'B', 'BC', 'C'])
+plt.title('Proportion of Aces from Each Serving Position', fontsize=16)
+plt.xlabel('Serve Position', fontsize=15)
+plt.ylabel('Proportion of Aces', fontsize=15)
+plt.xticks(rotation=45)
+plt.text(0.2, 0.7, 'B: Body\nBC: Body/Center\nBW: Body/Wide\nC: Center\nW: Wide', 
+         fontsize=12, color='black', ha='left', va='bottom', transform=plt.gca().transAxes)
+plt.show()
+```
+
+---
+
+#### Most successful serves based on aces
+
+```{python}
+serve_aces = serve_df[(serve_df['P1Ace'] == 1) | (serve_df['P2Ace'] == 1)]  
+
+serve_counts = serve_df.groupby('ServeDepth').size()
+ace_counts = serve_aces.groupby('ServeDepth').size()
+
+proportions = ace_counts / serve_counts
+
+plt.figure(figsize=(14,8.4))
+sns.barplot(x=proportions.index, y=proportions.values)
+plt.title('Proportion of Aces from Each Serving Depth', fontsize=16)
+plt.xlabel('Serve Position', fontsize=15)
+plt.ylabel('Proportion of Aces', fontsize=15)
+plt.xticks(rotation=45)
+plt.text(0.7, 0.78, 'CTL: Close to Line\nNCTL: Not Close to Line', 
+         fontsize=12, color='black', ha='left', va='bottom', transform=plt.gca().transAxes)
+plt.show()
+```
+
+---
+
+#### >Synthesis of serve position, depth, & speed
+
+- How do we map the optimal serve combinations?
+
+```python
+serve_df = serve_df[serve_df['Speed_MPH'] != 0]
+plt.figure(figsize=(14,8))
+sns.boxplot(x='ServeWidth', y='Speed_MPH', hue='ServeDepth', data=serve_df, 
+            palette='Set2')
+plt.title('Serve Speed by Serve Width and Serve Depth')
+plt.legend(title='Serve Depth', loc='upper right')
+plt.show()
+```
+
+---
+
+#### Synthesis of serve position, depth, & speed
+
+<div class="fragment">
+- How else can we visualize this?
+</div>
+
+```{python}
+serve_df = serve_df[serve_df['Speed_MPH'] != 0]
+plt.figure(figsize=(14,8))
+sns.boxplot(x='ServeWidth', y='Speed_MPH', hue='ServeDepth', data=serve_df, 
+            palette='Set2')
+plt.title('Serve Speed by Serve Width and Serve Depth', fontsize=15)
+plt.legend(title='Serve Depth', loc='upper right')
+plt.xlabel('Serve Width', fontsize=15)
+plt.ylabel('Speed (MPH)', fontsize=15)
+plt.show()
+```
+
+---
+
+#### Synthesis of serve position, depth, & speed
+
+```python
+heatmap_data = serve_df.groupby(['ServeDepth', 'ServeWidth'])['Speed_MPH'].mean().unstack()
+```
+
+```{python}
+heatmap_data = serve_df.groupby(['ServeDepth', 'ServeWidth'])['Speed_MPH'].mean().unstack()
+heatmap_data = heatmap_data[['W', 'BW', 'B', 'BC', 'C']]
+
+plt.figure(figsize=(14, 10))
+sns.heatmap(heatmap_data, annot=True, cmap="coolwarm", fmt=".1f", cbar_kws={'label': 'Average Serve Speed (MPH)'}, annot_kws={"size": 15})
+plt.title('Heatmap of Serve Speed by Serve Width and Return Depth', fontsize=15)
+plt.xlabel('Return Depth', fontsize=15)
+plt.ylabel('Serve Width', fontsize=15)
+plt.show()
+```
+
+---
+
+#### Synthesis of serve position, depth, & ace proportion
+
+```{python}
+serve_counts = serve_df.groupby(['ServeDepth', 'ServeWidth']).size()
+ace_counts = serve_aces.groupby(['ServeDepth', 'ServeWidth']).size()
+ace_probabilities = (ace_counts / serve_counts).unstack().fillna(0)
+ace_probabilities = ace_probabilities[['W', 'BW', 'B', 'BC', 'C']]
+
+plt.figure(figsize=(14, 10))
+sns.heatmap(ace_probabilities, annot=True, cmap="coolwarm", cbar_kws={'label': 'Ace Probability'},
+            annot_kws={"size": 15})
+plt.title('Heatmap of Ace Probability by Serve Width and Serve Depth', fontsize=15)
+plt.xlabel('Serve Width', fontsize=15)
+plt.ylabel('Serve Depth', fontsize=15)
+plt.show()
+```
+
+---
+
+## Playtime Analyses
+
+- **How does player performance change throughout a match?**
+    - Examining fatigue
+    - Mental fortitude
+
+---
+
+### Does the server maintain their advantage throughout the entire game?
+
+- Some tennis matches can last over 2 hours
+    - Maintaining powerful serves can cause arm fatigue
+    - General stamina decreases
+
+---
+
+### Does the server maintain their advantage throughout the entire game?
+
+```{python}
+#| echo: true
+serve_df['ElapsedTime_min'] = pd.to_timedelta(serve_df['ElapsedTime']).dt.total_seconds() / 60
+serve_df = serve_df.sort_values(by=['match_id', 'ElapsedTime_min'])
+
+serve_df['ServerWon'] = (serve_df['PointWinner'] == serve_df['PointServer']).astype(int)
+
+time_bin_size = 2
+serve_df['TimeBin'] = (serve_df['ElapsedTime_min'] // time_bin_size) * time_bin_size
+
+avg_server_win_rate = serve_df.groupby('TimeBin')['ServerWon'].mean()
+```
+
+---
+
+### Does the server maintain their advantage throughout the entire game?
+
+```{python}
+plt.figure(figsize=(16, 8))
+sns.lineplot(x=avg_server_win_rate.index, y=avg_server_win_rate.values, marker='o', linestyle='-', label='Average')
+
+plt.axhline(0.5, color='red', linestyle='dashed', label='50% (Neutral)')
+plt.title('Average Server Win Rate Over Match Time', fontsize=15)
+plt.xlabel('Elapsed Time (minutes)', fontsize=15)
+plt.ylabel('Server Win Rate', fontsize=15)
+plt.xlim(0, 200)
+plt.legend()
+plt.grid()
+plt.show()
+```
+
+---
+
+### Is there a difference in level of movement between winners & losers?
+
+- Does the control of the winner cause more movement for the loser?
+    - Precise aim & speed
+- Importance of aerobic stability
+
+```{python}
+#| echo: true
+val = 0
+wonSet = []
+for index, row in df2.iloc[::-1].iterrows():
+    if row['SetWinner'] != 0:
+        val = row['SetWinner']
+    wonSet.insert(0, val)
+df2['WonSet'] = wonSet
+```
+
+---
+
+### Is there a difference in level of movement between winners & losers?
+
+```{python}
+#| echo: true
+winner_distances = df2[df2['WonSet'] == 1]['P1DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P2DistanceRun'].tolist()
+loser_distances = df2[df2['WonSet'] == 1]['P2DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P1DistanceRun'].tolist()
+
+data = [winner_distances, loser_distances]
+labels = ['Winners', 'Losers']
+```
+
+---
+
+### Is there a difference in level of movement between winners & losers?
+
+```{python}
+sns.set_style("whitegrid")
+
+plt.figure(figsize=(14, 8))
+sns.boxplot(data=data, palette=["lightblue", "red"])
+plt.xticks([0, 1], labels)
+plt.ylim(0, 200)
+plt.title("Comparison of Movement Between Set Winners and Losers", fontsize=15)
+plt.ylabel("Distance Run (meters)", fontsize=15)
+
+plt.show()
+```
+
+---
+
+### Hypothesis Test
+
+```{python}
+#| echo: true
+winners_distance = df2[df2['WonSet'] == 1]['P1DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P2DistanceRun'].tolist()
+losers_distance = df2[df2['WonSet'] == 1]['P2DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P1DistanceRun'].tolist()
+
+t_stat, p_value = stats.ttest_ind(winners_distance, losers_distance, equal_var=False)
+print(f'p-value: {p_value}')
+```
+
+---
+
+### How does losing initially affect the outcome of the game? What about being down by x games?
+
+```{python}
+#| echo: true
+x = 5
+probs = []
+for i in range(1, x+1):
+    adv_df = df2[((df2['P1GamesWon'] == i) & (df2['P2GamesWon'] == 0)) | ((df2['P2GamesWon'] == i) & (df2['P1GamesWon'] == 0))]
+    wins = ((adv_df['P1GamesWon'] == i) & (adv_df['P2GamesWon'] == 0) & (adv_df['WonSet'] == 1)).sum() + \
+           ((adv_df['P2GamesWon'] == i) & (adv_df['P1GamesWon'] == 0) & (adv_df['WonSet'] == 2)).sum()
+    
+    probs.append(wins / len(adv_df))
+```
+
+---
+
+### How does losing initially affect the outcome of the game? What about being down by x games?
+
+```{python}
+plt.figure(figsize=(14, 10))
+plt.bar(['1-0', '2-0', '3-0', '4-0', '5-0'], height=probs)
+plt.xlabel('Game Lead', fontsize=15)
+plt.ylabel('Win Probability Estimate', fontsize=15)
+plt.show()
+```
+
+---
+
+All combinations of scores
+
+```{python}
+x = 5
+win_probs = []
+for i in range(0, x+1):
+    for j in range(0, x+1):
+        if i == j:
+            win_probs.append([i, j, 0.5])
+            continue
+        adv_df = df2[((df2['P1GamesWon'] == i) & (df2['P2GamesWon'] == j)) | ((df2['P2GamesWon'] == i) & (df2['P1GamesWon'] == j))]
+        wins = ((adv_df['P1GamesWon'] == i) & (adv_df['P2GamesWon'] == j) & (adv_df['WonSet'] == 1)).sum() + \
+            ((adv_df['P2GamesWon'] == i) & (adv_df['P1GamesWon'] == j) & (adv_df['WonSet'] == 2)).sum()
+        
+        prob = wins / len(adv_df)
+        win_probs.append([i, j, prob])
+
+df_plot = pd.DataFrame(win_probs, columns=['P1GamesWon', 'P2GamesWon', 'WinProb'])
+df_pivot = df_plot.pivot(index='P2GamesWon', columns='P1GamesWon', values='WinProb')
+
+plt.figure(figsize=(14, 10))
+sns.heatmap(df_pivot, annot=True, cmap="coolwarm", fmt=".4f", linewidths=0.5, cbar_kws={'label': 'Win Probability'}, annot_kws={"size": 15})
+
+plt.title('Set Win Probability Estimate by Game Score', fontsize=15)
+plt.xlabel('Player Games Won', fontsize=15)
+plt.ylabel('Opponent Games Won', fontsize=15)
+plt.gca().invert_yaxis() 
+plt.show()
+```
