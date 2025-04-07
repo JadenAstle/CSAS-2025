@@ -15,6 +15,26 @@ theme: black
 slide-number: true
 ---
 
+---
+
+::: columns
+::: column
+
+### About me
+
+- Jaden Astle
+- Middlefield, CT
+- Statistical Data Science, B.S.
+- Cognitive Science, B.A.
+
+:::
+::: column
+![](images/conn.png)
+:::
+:::
+
+---
+
 ### Introduction & Score Review
 
 - 1v1 or 2v2 format
@@ -48,6 +68,19 @@ slide-number: true
         - If the server scores the next point -> "ad-in"
         - If the receiver scores the next point -> "ad-out"
         - If one player scores a point followed by the opponent scoring a point -> back to "deuce"
+
+---
+
+## Roadmap
+
+1. Serve Analyses
+    - Success rates of 1st vs 2nd serves
+    - Examining faster serves
+    - Serve area breakdown
+2. Playtime Analyses
+    - Server advantage throughout the game
+    - Movement analysis
+    - Score-based trends
 
 ---
 
@@ -154,7 +187,8 @@ print(f'({ci_lower[1]}, {ci_upper[1]})')
 ```{python}
 #| echo: true
 import seaborn as sns
-serve_df.loc[:, 'PointWon'] = (serve_df['PointWinner'] == serve_df['ServeIndicator']).astype(int)
+serve_df.loc[:, 'PointWon'] = (
+    serve_df['PointWinner'] == serve_df['ServeIndicator']).astype(int)
 serve_df = serve_df[serve_df['Speed_MPH'] != 0]  
 
 plt.figure(figsize=(12,10))
@@ -216,7 +250,7 @@ print(f'Cohen\'s d: {cohen_d:.3f}')
 :::: {.column width="50%"}
 
 <div style="position: absolute; bottom: 90px; right: 0.5;">
-![](images/court.jpeg){style="transform: rotate(90deg); width=100%; length=200%"}
+![](images/court_diagram.png){style="transform: rotate(90deg); width=100%; length=200%"}
 </div>
 
 ::::
@@ -352,6 +386,26 @@ plt.show()
 
 ---
 
+#### Synthesis of serve position, depth, speed, & ace proportion
+
+```{python}
+#| echo: true
+#| output: flex
+import statsmodels.api as sm
+
+df2['is_ace'] = (df2['P1Ace'] == 1) | (df2['P2Ace'] == 1)
+ace_analysis = df2[['Speed_MPH', 'ServeWidth', 'ServeDepth', 'is_ace']]
+
+X = pd.get_dummies(ace_analysis[['Speed_MPH', 'ServeWidth', 'ServeDepth']], drop_first=True)
+X = sm.add_constant(X).astype(float)
+y = ace_analysis['is_ace']
+
+model = sm.Logit(y, X).fit()
+print(model.summary())
+```
+
+---
+
 ## Playtime Analyses
 
 - **How does player performance change throughout a match?**
@@ -385,20 +439,65 @@ avg_server_win_rate = serve_df.groupby('TimeBin')['ServerWon'].mean()
 
 ---
 
-### Does the server maintain their advantage throughout the entire game?
+### Does the server maintain their advantage throughout the entire match?
 
 ```{python}
-plt.figure(figsize=(16, 8))
-sns.lineplot(x=avg_server_win_rate.index, y=avg_server_win_rate.values, marker='o', linestyle='-', label='Average')
+#| output: html
+import plotly.graph_objects as go
 
-plt.axhline(0.5, color='red', linestyle='dashed', label='50% (Neutral)')
-plt.title('Average Server Win Rate Over Match Time', fontsize=15)
-plt.xlabel('Elapsed Time (minutes)', fontsize=15)
-plt.ylabel('Server Win Rate', fontsize=15)
-plt.xlim(0, 200)
-plt.legend()
-plt.grid()
-plt.show()
+serve_df['ElapsedTime_min'] = pd.to_timedelta(serve_df['ElapsedTime']).dt.total_seconds() / 60
+serve_df = serve_df.sort_values(by=['match_id', 'ElapsedTime_min'])
+
+serve_df['ServerWon'] = (serve_df['PointWinner'] == serve_df['PointServer']).astype(int)
+
+time_bin_size = 2
+serve_df['TimeBin'] = (serve_df['ElapsedTime_min'] // time_bin_size) * time_bin_size
+
+bin_stats = serve_df.groupby('TimeBin').agg(
+    ServerWinRate=('ServerWon', 'mean'),
+    Count=('ServerWon', 'count')
+).reset_index()
+
+bin_stats['CI'] = 1.96 * np.sqrt((bin_stats['ServerWinRate'] * (1 - bin_stats['ServerWinRate'])) / bin_stats['Count'])
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=bin_stats['TimeBin'],
+    y=bin_stats['ServerWinRate'],
+    mode='lines+markers',
+    name='Avg Server Win Rate',
+    hovertemplate="<b>Time Bin:</b> %{x} min<br>" +
+                  "<b>Win Rate:</b> %{y:.3f}<br>" +
+                  "<b>95% CI:</b> ±%{customdata:.3f}",
+    customdata=bin_stats['CI']
+))
+
+fig.add_trace(go.Scatter(
+    x=np.concatenate([bin_stats['TimeBin'], bin_stats['TimeBin'][::-1]]),
+    y=np.concatenate([bin_stats['ServerWinRate'] + bin_stats['CI'], (bin_stats['ServerWinRate'] - bin_stats['CI'])[::-1]]),
+    fill='toself',
+    fillcolor='rgba(0,100,200,0.2)',
+    line=dict(color='rgba(255,255,255,0)'),
+    hoverinfo='skip', 
+    name='95% Confidence Interval'
+))
+
+fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="50% (Neutral)", annotation_position="top right")
+
+fig.update_layout(
+    title="Average Server Win Rate Over Match Time",
+    xaxis_title="Elapsed Time (minutes)",
+    yaxis_title="Server Win Rate",
+    xaxis=dict(range=[0, 200]),
+    yaxis=dict(range=[0, 1]),
+    template="plotly_white",
+    hovermode="x",
+    height=800
+)
+
+fig.show()
+
+
 ```
 
 ---
@@ -426,8 +525,12 @@ df2['WonSet'] = wonSet
 
 ```{python}
 #| echo: true
-winner_distances = df2[df2['WonSet'] == 1]['P1DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P2DistanceRun'].tolist()
-loser_distances = df2[df2['WonSet'] == 1]['P2DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P1DistanceRun'].tolist()
+winner_distances = df2[
+    df2['WonSet'] == 1][
+        'P1DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P2DistanceRun'].tolist()
+loser_distances = df2[
+    df2['WonSet'] == 1][
+        'P2DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P1DistanceRun'].tolist()
 
 data = [winner_distances, loser_distances]
 labels = ['Winners', 'Losers']
@@ -441,9 +544,9 @@ labels = ['Winners', 'Losers']
 sns.set_style("whitegrid")
 
 plt.figure(figsize=(14, 8))
-sns.boxplot(data=data, palette=["lightblue", "red"])
+sns.boxplot(data=data, palette=["lightblue", "red"], showfliers=False)
 plt.xticks([0, 1], labels)
-plt.ylim(0, 200)
+plt.ylim(0, 50)
 plt.title("Comparison of Movement Between Set Winners and Losers", fontsize=15)
 plt.ylabel("Distance Run (meters)", fontsize=15)
 
@@ -454,12 +557,21 @@ plt.show()
 
 ### Hypothesis Test
 
+$$
+H_0: \mu_1 = \mu_2
+$$
+
+$$
+H_1: \mu_1 \neq \mu_2
+$$
+
+$$
+\alpha = 0.05
+$$
+
 ```{python}
 #| echo: true
-winners_distance = df2[df2['WonSet'] == 1]['P1DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P2DistanceRun'].tolist()
-losers_distance = df2[df2['WonSet'] == 1]['P2DistanceRun'].tolist() + df2[df2['WonSet'] == 2]['P1DistanceRun'].tolist()
-
-t_stat, p_value = stats.ttest_ind(winners_distance, losers_distance, equal_var=False)
+t_stat, p_value = stats.ttest_ind(winner_distances, loser_distances, equal_var=False)
 print(f'p-value: {p_value}')
 ```
 
@@ -472,9 +584,16 @@ print(f'p-value: {p_value}')
 x = 5
 probs = []
 for i in range(1, x+1):
-    adv_df = df2[((df2['P1GamesWon'] == i) & (df2['P2GamesWon'] == 0)) | ((df2['P2GamesWon'] == i) & (df2['P1GamesWon'] == 0))]
-    wins = ((adv_df['P1GamesWon'] == i) & (adv_df['P2GamesWon'] == 0) & (adv_df['WonSet'] == 1)).sum() + \
-           ((adv_df['P2GamesWon'] == i) & (adv_df['P1GamesWon'] == 0) & (adv_df['WonSet'] == 2)).sum()
+    adv_df = df2[
+        ((df2['P1GamesWon'] == i) & (df2['P2GamesWon'] == 0)) | (
+            (df2['P2GamesWon'] == i) & (df2['P1GamesWon'] == 0))]
+
+    wins = (
+        (adv_df['P1GamesWon'] == i) & (adv_df['P2GamesWon'] == 0) & (
+            adv_df['WonSet'] == 1)).sum() + \
+           (
+            (adv_df['P2GamesWon'] == i) & (adv_df['P1GamesWon'] == 0) & (
+                adv_df['WonSet'] == 2)).sum()
     
     probs.append(wins / len(adv_df))
 ```
