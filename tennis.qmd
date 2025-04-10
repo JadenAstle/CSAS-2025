@@ -414,7 +414,7 @@ print(model.summary())
 
 ---
 
-### Does the server maintain their advantage throughout the entire game?
+### Does the server maintain their advantage throughout the entire match?
 
 - Some tennis matches can last over 2 hours
     - Maintaining powerful serves can cause arm fatigue
@@ -422,7 +422,7 @@ print(model.summary())
 
 ---
 
-### Does the server maintain their advantage throughout the entire game?
+### Does the server maintain their advantage throughout the entire match?
 
 ```{python}
 #| echo: true
@@ -492,7 +492,8 @@ fig.update_layout(
     yaxis=dict(range=[0, 1]),
     template="plotly_white",
     hovermode="x",
-    height=800
+    height=800,
+    width=1400
 )
 
 fig.show()
