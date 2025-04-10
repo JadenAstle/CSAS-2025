@@ -641,3 +641,17 @@ plt.ylabel('Opponent Games Won', fontsize=15)
 plt.gca().invert_yaxis() 
 plt.show()
 ```
+
+---
+
+## References & Further Resources
+
+- JeffSackmann. (n.d.). GitHub - JeffSackmann/tennis_slam_pointbypoint: Point-by-point data for Grand Slams, 2011-current. GitHub. https://github.com/JeffSackmann/tennis_slam_pointbypoint
+
+- Tennis scoring: Points, sets & games | Tennis Rules | USTA. (n.d.). https://www.usta.com/en/home/improve/tips-and-instruction/national/tennis-scoring-rules.html
+
+### Further resources:
+
+- [Tennis Explorer](https://tennisexplorer.com)
+- [Tennis Abstract](https://www.tennisabstract.com/charting/meta.html)
+- [Jeff Sackmann's GitHub](https://github.com/JeffSackmann)
